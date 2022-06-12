@@ -1,4 +1,5 @@
 /docklogs
+/docklogs-debian-bullseye
 
 # Binaries for programs and plugins
 *.exe
