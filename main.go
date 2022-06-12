@@ -1,12 +1,14 @@
 package main
 
 import (
+	"compress/gzip"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"os/signal"
 	"path"
@@ -25,6 +27,27 @@ type cli struct {
 	client     *docker.Client
 	clientNoTo *docker.Client // client without timeout for streaming requests
 	logsDir    string
+	gzipLogs   bool
+}
+
+func (c *cli) composeLogFileName(container *types.ContainerJSON) string {
+	var name string
+
+	cName := strings.ReplaceAll(container.Name, "/", "__")
+	if jobID, ok := container.Config.Labels["com.gitlab.gitlab-runner.job.id"]; ok {
+		name = jobID + "-" + cName
+	} else {
+		name = container.ID + "-" + cName
+	}
+
+	// linux max file name is 255 bytes
+	if c.gzipLogs {
+		name = name[:int(math.Min(float64(len(name)), 248))] + ".log.gz"
+	} else {
+		name = name[:int(math.Min(float64(len(name)), 251))] + ".log"
+	}
+
+	return path.Join(c.logsDir, name)
 }
 
 func (c *cli) captureContainerLog(ctx context.Context, id string) error {
@@ -33,15 +56,7 @@ func (c *cli) captureContainerLog(ctx context.Context, id string) error {
 		return fmt.Errorf("Failed to setup container log capturing: %w", err)
 	}
 
-	// TODO trim filename?
-	var logName string
-	containerName := strings.ReplaceAll(container.Name, "/", "__")
-	if jobID, ok := container.Config.Labels["com.gitlab.gitlab-runner.job.id"]; ok {
-		logName = path.Join(c.logsDir, jobID+"-"+containerName+".log")
-	} else {
-		logName = path.Join(c.logsDir, container.ID+"-"+containerName+".log")
-	}
-
+	logName := c.composeLogFileName(&container)
 	logReader, err := c.clientNoTo.ContainerLogs(ctx, id,
 		types.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Follow: true})
 	if err != nil {
@@ -58,10 +73,17 @@ func (c *cli) captureContainerLog(ctx context.Context, id string) error {
 	}
 	defer logFile.Close()
 
+	var writer io.Writer = logFile
+	if c.gzipLogs {
+		gzWriter := gzip.NewWriter(logFile)
+		defer gzWriter.Close()
+		writer = gzWriter
+	}
+
 	if container.Config.Tty {
-		_, err = io.Copy(logFile, logReader)
+		_, err = io.Copy(writer, logReader)
 	} else {
-		_, err = stdcopy.StdCopy(logFile, logFile, logReader)
+		_, err = stdcopy.StdCopy(writer, writer, logReader)
 	}
 	if err != nil && err != io.EOF {
 		return err
@@ -202,6 +224,7 @@ func main() {
 	var (
 		printVersion  = flag.Bool("v", false, "print version")
 		logsDir       = flag.String("d", "container_log_capture", "directory where to save logs")
+		noGzip        = flag.Bool("nogz", false, "do not gzip logs")
 		clientTimeout = flag.Duration("docker.timeout", time.Second*10, "docker client request timeout")
 	)
 	flag.Parse()
@@ -236,7 +259,7 @@ func main() {
 	}
 	log.Printf("Docker info: %+v", dockerInfo)
 
-	cli := cli{client, clientNoTo, *logsDir}
+	cli := cli{client, clientNoTo, *logsDir, !*noGzip}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
