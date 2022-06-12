@@ -10,6 +10,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path"
 	"runtime/debug"
@@ -21,6 +22,10 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	docker "github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
+)
+
+const (
+	SystemdUnitName = "docklogs"
 )
 
 type cli struct {
@@ -220,12 +225,38 @@ func createLogsDir(dir string) (func() error, error) {
 	return selfDestruct, nil
 }
 
+func runSystemd() error {
+	// systemd-run --user -d -u docklogs -p KillSignal=SIGINT  ./docklogs
+	args := []string{"-d", "-u", SystemdUnitName, "-p", "KillSignal=SIGINT"}
+
+	if os.Getuid() > 0 {
+		args = append(args, "--user")
+	} else if os.Getuid() < 0 {
+		return errors.New("This feature is unavailable for Windows")
+	}
+
+	// remove -systemd flag
+	for i, f := range os.Args {
+		if f == "-systemd" {
+			args = append(args, os.Args[:i]...)
+			args = append(args, os.Args[i+1:]...)
+			break
+		}
+	}
+
+	cmd := exec.Command("systemd-run", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 func main() {
 	var (
 		printVersion  = flag.Bool("v", false, "print version")
 		logsDir       = flag.String("d", "container_log_capture", "directory where to save logs")
 		noGzip        = flag.Bool("nogz", false, "do not gzip logs")
 		clientTimeout = flag.Duration("docker.timeout", time.Second*10, "docker client request timeout")
+		systemd       = flag.Bool("systemd", false, "invoke this binary using systemd-run to run and systemd service")
 	)
 	flag.Parse()
 
@@ -233,6 +264,27 @@ func main() {
 		buildInfo, _ := debug.ReadBuildInfo()
 		fmt.Print(buildInfo)
 		os.Exit(0)
+	}
+
+	if *systemd {
+		err := runSystemd()
+		exitCode := 0
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		} else if err != nil {
+			log.Fatalf("Failed to launch binary using systemd: %s", err)
+		}
+
+		var userFlag string
+		if os.Getuid() > 0 {
+			userFlag = " --user"
+		}
+		fmt.Println()
+		fmt.Printf("To check service status run 'systemctl%s status %s'\n", userFlag, SystemdUnitName)
+		fmt.Printf("To see logs run 'journalctl%s -u %s'\n", userFlag, SystemdUnitName)
+		fmt.Printf("To stop service run 'systemctl%s stop %s'\n", userFlag, SystemdUnitName)
+		os.Exit(exitCode)
 	}
 
 	logsDirSelfDestruct, err := createLogsDir(*logsDir)
