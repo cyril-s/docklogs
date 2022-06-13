@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -27,6 +26,17 @@ import (
 const (
 	SystemdUnitName = "docklogs"
 )
+
+type number interface {
+	uint | int | float32 | float64
+}
+
+func min[T number](a, b T) T {
+	if a < b {
+		return a
+	}
+	return b
+}
 
 type cli struct {
 	client     *docker.Client
@@ -47,9 +57,9 @@ func (c *cli) composeLogFileName(container *types.ContainerJSON) string {
 
 	// linux max file name is 255 bytes
 	if c.gzipLogs {
-		name = name[:int(math.Min(float64(len(name)), 248))] + ".log.gz"
+		name = name[:min(len(name), 248)] + ".log.gz"
 	} else {
-		name = name[:int(math.Min(float64(len(name)), 251))] + ".log"
+		name = name[:min(len(name), 251)] + ".log"
 	}
 
 	return path.Join(c.logsDir, name)
