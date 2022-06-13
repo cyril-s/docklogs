@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -248,7 +249,8 @@ func runSystemd() error {
 	// remove -systemd flag
 	for i, f := range os.Args {
 		if f == "-systemd" {
-			args = append(args, os.Args[:i]...)
+			args = append(args, filepath.Clean(os.Args[0]))
+			args = append(args, os.Args[1:i]...)
 			args = append(args, os.Args[i+1:]...)
 			break
 		}
