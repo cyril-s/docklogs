@@ -52,7 +52,7 @@ func (c *cli) composeLogFileName(container *types.ContainerJSON) string {
 	if jobID, ok := container.Config.Labels["com.gitlab.gitlab-runner.job.id"]; ok {
 		name = jobID + "-" + cName
 	} else {
-		name = container.ID + "-" + cName
+		name = container.ID[:12] + "-" + cName
 	}
 
 	// linux max file name is 255 bytes
@@ -117,13 +117,13 @@ func (c *cli) initCapturing(ctx context.Context, jobs *sync.Map) error {
 	for _, container := range containers {
 		jobs.Store(container.ID, true)
 		go func(id, name string) {
-			log.Printf("Picking up capture of container=%s id=%s log", name, id)
+			log.Printf("Picking up capture of container=%s id=%s log", name, id[:12])
 			err := c.captureContainerLog(ctx, id)
 			if err != nil && !errors.Is(err, context.Canceled) {
 				log.Print(err)
 			}
 			jobs.Delete(id)
-			log.Printf("Finished to capture container=%s id=%s log", name, id)
+			log.Printf("Finished to capture container=%s id=%s log", name, id[:12])
 		}(container.ID, strings.Join(container.Names, " "))
 	}
 
@@ -155,9 +155,9 @@ func (c *cli) runEventLoop(ctx context.Context, jobs *sync.Map) error {
 				id := event.Actor.ID
 				name := event.Actor.Attributes["name"]
 				defer jobs.Delete(id)
-				defer log.Printf("Finished to capture container=%s id=%s log", name, id)
+				defer log.Printf("Finished to capture container=%s id=%s log", name, id[:12])
 
-				log.Printf("Starting to capture container=%s id=%s log", name, id)
+				log.Printf("Starting to capture container=%s id=%s log", name, id[:12])
 				err := c.captureContainerLog(ctx, id)
 				if err != nil && !errors.Is(err, context.Canceled) {
 					log.Print(err)
