@@ -256,7 +256,11 @@ func runSystemd() error {
 	// remove -systemd flag
 	for i, f := range os.Args {
 		if f == "-systemd" {
-			args = append(args, filepath.Clean(os.Args[0]))
+			if abs, err := filepath.Abs(os.Args[0]); err != nil {
+				return fmt.Errorf("Failed to get absolute path this binary: %w", err)
+			} else {
+				args = append(args, abs)
+			}
 			args = append(args, os.Args[1:i]...)
 			args = append(args, os.Args[i+1:]...)
 			break
