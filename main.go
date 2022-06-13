@@ -3,6 +3,7 @@ package main
 import (
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -94,6 +95,12 @@ func (c *cli) captureContainerLog(ctx context.Context, id string) error {
 		gzWriter := gzip.NewWriter(logFile)
 		defer gzWriter.Close()
 		writer = gzWriter
+	}
+
+	if data, err := json.MarshalIndent(container, "", "  "); err != nil {
+		log.Printf("Failed to dump container info into log file: %s", err)
+	} else if _, err := writer.Write(append(data, "\n"...)); err != nil {
+		log.Printf("Failed to dump container info into log file: %s", err)
 	}
 
 	if container.Config.Tty {
